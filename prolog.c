@@ -10,17 +10,16 @@
 
 /* Misc helpers */
 
-void *prover_malloc(size_t n) {
+static inline void *prover_malloc(size_t n) {
   void *ptr = malloc(n);
   if (!ptr)
     puts("\nOut of Memory.\n");
   return ptr;
 }
 
-void indent(size_t indents, const size_t size) {
-  for (size_t i = 0; i < indents; i++)
-    for (size_t j = 0; j < size; j++)
-      putchar(' ');
+static inline void indent(size_t indents, const size_t size) {
+  for (size_t i = 0; i < (indents * size); i++)
+    putchar(' ');
 }
 
 typedef struct {
@@ -49,6 +48,8 @@ static inline bool timestamp_cmp(Timestamp ts1, Timestamp ts2) {
 typedef char *Atom;
 union Term;
 typedef union Term Term;
+struct Trail;
+typedef struct Trail Trail;
 struct Goal;
 typedef struct Goal Goal;
 struct Clause;
@@ -56,14 +57,14 @@ typedef struct Clause Clause;
 struct Program;
 typedef struct Program Program;
 
-/********/
-/* Term */
-/********/
+/****************/
+/* Term Structs */
+/****************/
 
 typedef struct {
   size_t arity;
   Atom fsym;
-  Term *subterms;
+  Term **subterms;
 } TermConstant;
 
 typedef struct {
@@ -71,7 +72,7 @@ typedef struct {
   Timestamp timestamp;
 } TermVariable;
 
-typedef union Term {
+typedef struct Term {
   union {
     TermVariable tv; // tc_flag = 0
     TermConstant tc; // tc_flag = 1
@@ -79,8 +80,16 @@ typedef union Term {
   bool tc_flag;
 } Term;
 
-/* Claims ownership of subterms */
-Term *TermCons_init(Term *self, Atom f, Term *subterms, size_t arity) {
+static inline bool Term_isCons(Term* term) { return term->tc_flag == 1; }
+static inline bool Term_isVar(Term* term)  { return term->tc_flag == 0; }
+
+
+/************/
+/* TermCons */
+/************/
+
+/* Shares ownership of subterms */
+static inline Term *TermCons_init(Term *self, Atom f, Term** subterms, size_t arity) {
   self->tc.fsym = f;
   self->tc.subterms = subterms;
   self->tc.arity = arity;
@@ -88,17 +97,80 @@ Term *TermCons_init(Term *self, Atom f, Term *subterms, size_t arity) {
   return self;
 }
 
-Term *TermVar_init(Term *self) {
+#define _PROLOG_TERMBUF(n)  Term** buf = prover_malloc(sizeof(Term*) * n);
+
+static inline Term *TermCons_init0(Term *self, Atom f) {
+  return TermCons_init(self, f, NULL, 0);
+}
+
+static inline Term *TermCons_init1(Term *self, Atom f, Term* term1) {
+  _PROLOG_TERMBUF(1);
+  buf[0] = term1;
+  return TermCons_init(self, f, buf, 1);
+}
+static inline Term *TermCons_init2(Term *self, Atom f, Term* term1, Term* term2) {
+  _PROLOG_TERMBUF(2);
+  buf[0] = term1;
+  buf[1] = term2;
+  return TermCons_init(self, f, buf, 2);
+}
+static inline Term *TermCons_init3(Term *self, Atom f, Term* term1, Term* term2, Term* term3) {
+  _PROLOG_TERMBUF(3);
+  buf[0] = term1;
+  buf[1] = term2;
+  buf[2] = term3;
+  return TermCons_init(self, f, buf, 3);
+}
+static inline Term *TermCons_init4(Term *self, Atom f, Term* term1, Term* term2, Term* term3, Term* term4) {
+  _PROLOG_TERMBUF(4);
+  buf[0] = term1;
+  buf[1] = term2;
+  buf[2] = term3;
+  buf[3] = term4;
+  return TermCons_init(self, f, buf, 4);
+}
+
+/***********/
+/* TermVar */
+/***********/
+
+
+static inline Term *TermVar_init(Term *self) {
   self->tc_flag = false;
   self->tv.instance = self;
   self->tv.timestamp = timestamp_next();
   return self;
 }
 
-void Term_print(Term *self) {}
-bool Term_unify(Term *self, Term *other) {}
-Term *Term_copy(Term *self) {
-  if (self->tc_flag) {
+/*******************************/
+/* Term (Shared Functionality) */
+/*******************************/
+
+static inline void Term_print(Term *self) {}
+
+static inline bool Term_unify(Term *self, Term *other) {
+  /* Both TermCons */
+  if (Term_isCons(self) & Term_isCons(other)) {
+    if (self->tc.arity != other->tc.arity) return false;
+    if (!Atom_eq(self->tc.fsym, other->tc.fsym)) return false;
+    size_t arity = self->tc.arity;
+    for (size_t i = 0; i < arity; i++)
+      if (!Term_unify(self->tc.subterms[i], other->tc.subterms[i]))
+        return false;
+    return true;
+  }
+  /* Both TermVar */
+  else if (Term_isVar(self) & Term_isVar(other)) {
+  }
+  /* Mixed */
+  else {
+    Term* cons = Term_isCons(self) ? self : other;
+    Term* var  = Term_isVar(self)  ? self : other;
+  }
+}
+
+static inline Term* Term_copy(Term *self) {
+  if (Term_isCons(self)) {
     size_t arity = self->tc.arity;
     char *buf = prover_malloc(sizeof(Term) + sizeof(Term) * arity);
     Term *cpy = (Term *)buf;
@@ -109,6 +181,34 @@ Term *Term_copy(Term *self) {
     return TermVar_init((Term *)prover_malloc(sizeof(Term)));
   }
 }
+
+/*********/
+/* Trail */
+/*********/
+
+typedef struct {
+  /* A TermVar */
+  Term* var;
+  /* Linked List */
+  Trail* prev;
+} Trail;
+
+static Trail* sofar = NULL;
+
+static inline Trail* Trail_init(Trail* self, Term* var, Trail* prev) {
+  self->var = var;
+  self->prev = prev;
+  return self;
+}
+
+static inline Trail* Trail_note() { return sofar; }
+static inline void Trail_push(TermVar *x) { sofar = new Trail(x, sofar); }
+static void Trail_backtrack(Trail* to) {
+  for (; sofar != to; sofar = sofar->prev)
+    sofar->tcar->reset();
+  }
+}
+
 
 /********/
 /* Goal */
@@ -122,19 +222,6 @@ Term *Term_copy(Term *self) {
 /* Program */
 /***********/
 
-class Term {
-public:
-  virtual void print() = 0;
-
-public:
-  virtual bool unify(Term *) = 0;
-
-public:
-  virtual bool unify2(TermCons *) = 0;
-
-public:
-  virtual Term *copy() = 0;
-};
 
 class TermCons : public Term {
 private:
@@ -143,21 +230,7 @@ private:
   Term **args;
 
 public:
-  void print() {
-    fsym->print();
-    if (arity > 0) {
-      cout << "(";
-      for (int i = 0; i < arity;) {
-        args[i]->print();
-        if (++i < arity)
-          cout << ",";
-      }
-      cout << ")";
-    }
-  }
   bool unify(Term *t) { return t->unify2(this); }
-  Term *copy() { return copy2(); }
-  TermCons *copy2() { return new TermCons(this); }
 
 private:
   TermCons(TermCons *p)
