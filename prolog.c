@@ -46,8 +46,8 @@ static inline bool timestamp_cmp(Timestamp ts1, Timestamp ts2) {
 /****************/
 
 typedef char *Atom;
-union Term;
-typedef union Term Term;
+struct Term;
+typedef struct Term Term;
 struct Trail;
 typedef struct Trail Trail;
 struct Goal;
@@ -56,6 +56,14 @@ struct Clause;
 typedef struct Clause Clause;
 struct Program;
 typedef struct Program Program;
+
+/********/
+/* Atom */
+/********/
+
+static inline bool Atom_eq(Atom self, Atom other) {
+  return strcmp(self, other) == 0;
+}
 
 /****************/
 /* Term Structs */
@@ -72,13 +80,13 @@ typedef struct {
   Timestamp timestamp;
 } TermVariable;
 
-typedef struct Term {
+struct Term {
   union {
     TermVariable tv; // tc_flag = 0
     TermConstant tc; // tc_flag = 1
   };
   bool tc_flag;
-} Term;
+};
 
 static inline bool Term_isCons(Term* term) { return term->tc_flag == 1; }
 static inline bool Term_isVar(Term* term)  { return term->tc_flag == 0; }
@@ -142,6 +150,11 @@ static inline Term *TermVar_init(Term *self) {
   return self;
 }
 
+static inline Term* TermVar_reset(Term* self) {
+  self->tv.instance = self;
+  return self;
+}
+
 /*******************************/
 /* Term (Shared Functionality) */
 /*******************************/
@@ -151,8 +164,11 @@ static inline void Term_print(Term *self) {}
 static inline bool Term_unify(Term *self, Term *other) {
   /* Both TermCons */
   if (Term_isCons(self) & Term_isCons(other)) {
+    /* If the arity is wrong or they refer to different atoms, return false. */
     if (self->tc.arity != other->tc.arity) return false;
     if (!Atom_eq(self->tc.fsym, other->tc.fsym)) return false;
+
+    /* Unify if the subterms all unify. */
     size_t arity = self->tc.arity;
     for (size_t i = 0; i < arity; i++)
       if (!Term_unify(self->tc.subterms[i], other->tc.subterms[i]))
@@ -171,11 +187,17 @@ static inline bool Term_unify(Term *self, Term *other) {
 
 static inline Term* Term_copy(Term *self) {
   if (Term_isCons(self)) {
+    // Malloc a new Term and space for subterms at the same time
     size_t arity = self->tc.arity;
-    char *buf = prover_malloc(sizeof(Term) + sizeof(Term) * arity);
+    char *buf = prover_malloc(sizeof(Term) + sizeof(Term*) * arity);
     Term *cpy = (Term *)buf;
-    Term *subterms = cpy + 1;
-    memcpy(subterms, self->tc.subterms, self->tc.arity);
+
+    // Clone the subterms
+    Term **subterms = (Term**)(cpy + 1);
+    Term **to_copy = self->tc.subterms;
+    for (size_t i = 0; i < self->tc.arity; i++)
+      subterms[i] = Term_copy(to_copy[i]);
+
     return TermCons_init(cpy, self->tc.fsym, subterms, arity);
   } else {
     return TermVar_init((Term *)prover_malloc(sizeof(Term)));
@@ -186,12 +208,12 @@ static inline Term* Term_copy(Term *self) {
 /* Trail */
 /*********/
 
-typedef struct {
+struct Trail {
   /* A TermVar */
   Term* var;
   /* Linked List */
   Trail* prev;
-} Trail;
+};
 
 static Trail* sofar = NULL;
 
@@ -202,7 +224,7 @@ static inline Trail* Trail_init(Trail* self, Term* var, Trail* prev) {
 }
 
 static inline Trail* Trail_note() { return sofar; }
-static inline void Trail_push(TermVar *x) { sofar = new Trail(x, sofar); }
+static inline void Trail_push(Term *var) { sofar = new Trail(var, sofar); }
 static void Trail_backtrack(Trail* to) {
   for (; sofar != to; sofar = sofar->prev)
     sofar->tcar->reset();
@@ -263,7 +285,15 @@ public:
     else
       cout << "_" << varno;
   };
-  bool unify(Term *t);
+
+  bool unify(Term *t) {
+    if (instance != this)
+      return instance->unify(t);
+    Trail::Push(this);
+    instance = t;
+    return true;
+  };
+
   Term *copy();
   Term *reset() { instance = this; }
 
@@ -336,7 +366,6 @@ public:
       sofar->tcar->reset();
   }
 };
-Trail *Trail::sofar = NULL;
 
 bool TermVar::unify(Term *t) {
   if (instance != this)
