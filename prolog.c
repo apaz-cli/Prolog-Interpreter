@@ -61,6 +61,8 @@ typedef struct Program Program;
 /* Atom */
 /********/
 
+typedef char *Atom;
+
 static inline bool Atom_eq(Atom self, Atom other) {
   return strcmp(self, other) == 0;
 }
@@ -112,36 +114,25 @@ static inline Term *TermCons_init0(Term *self, Atom f) {
 }
 
 static inline Term *TermCons_init1(Term *self, Atom f, Term* term1) {
-  _PROLOG_TERMBUF(1);
-  buf[0] = term1;
+  _PROLOG_TERMBUF(1); buf[0] = term1;
   return TermCons_init(self, f, buf, 1);
 }
 static inline Term *TermCons_init2(Term *self, Atom f, Term* term1, Term* term2) {
-  _PROLOG_TERMBUF(2);
-  buf[0] = term1;
-  buf[1] = term2;
+  _PROLOG_TERMBUF(2); buf[0] = term1; buf[1] = term2;
   return TermCons_init(self, f, buf, 2);
 }
 static inline Term *TermCons_init3(Term *self, Atom f, Term* term1, Term* term2, Term* term3) {
-  _PROLOG_TERMBUF(3);
-  buf[0] = term1;
-  buf[1] = term2;
-  buf[2] = term3;
+  _PROLOG_TERMBUF(3); buf[0] = term1; buf[1] = term2; buf[2] = term3;
   return TermCons_init(self, f, buf, 3);
 }
 static inline Term *TermCons_init4(Term *self, Atom f, Term* term1, Term* term2, Term* term3, Term* term4) {
-  _PROLOG_TERMBUF(4);
-  buf[0] = term1;
-  buf[1] = term2;
-  buf[2] = term3;
-  buf[3] = term4;
+  _PROLOG_TERMBUF(4); buf[0] = term1; buf[1] = term2; buf[2] = term3; buf[3] = term4;
   return TermCons_init(self, f, buf, 4);
 }
 
 /***********/
 /* TermVar */
 /***********/
-
 
 static inline Term *TermVar_init(Term *self) {
   self->tc_flag = false;
@@ -154,6 +145,7 @@ static inline Term* TermVar_reset(Term* self) {
   self->tv.instance = self;
   return self;
 }
+
 
 /*******************************/
 /* Term (Shared Functionality) */
