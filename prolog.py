@@ -44,12 +44,15 @@ class TermVar:
             return instance.unify(term)
         instance = term
         # Push self to trail
+        trail_push(self)
+        self.instance = term
         return True
 
     def unifyCons(self, cons):
         return self.unify(cons)
 
     def copy(self):
+        trail_push(self)
         return TermVar(self.instance)
 
 
@@ -83,7 +86,22 @@ class TermVarMapping:
 
 
 class Trail:
-    pass
+    def __init__(self, head, body):
+        self.tcar = head
+        self.tcdr = body
+        pass
+
+trail = Trail()
+
+def trail_push(tv):
+    global trail
+    trail = Trail(tv, trail)
+
+def trail_undo(to):
+    global trail
+    while trail != to:
+        trail.tcar.instance = trail.tcar
+        trail = trail.tcdr
 
 
 class Program:
